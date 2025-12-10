@@ -1,49 +1,42 @@
-# UMC Cloud Variable API (Public)
+# UMC Cloud Variable API
 
-Cloudflare Workers 上で動作する Cloud Variable API です。クラス定義と JSON スキーマを登録し、任意の JSON をバリデーション付きで保存・検索できます。OpenAPI ドキュメントを同梱し、Pages で公開可能です。
+UMC に登録済みのユーザー向け Cloud Variable API です。UMC 本体で発行された `userId` を使って、クラス定義を登録し、そのスキーマに沿った JSON データを保存・検索できます。利用には UMC への登録とログイン（IP 一致によるセッション確認）が必要です。
 
-## 主な機能
+## エンドポイント
 
-- クラス定義の登録 (`/class/create`) とスキーマバリデーション
-- アイテムの作成・更新・削除・検索 (`/users/:userId/class/:className/items/...`)
-- 検索結果の任意テンプレート整形（`template` / `responseShape`）
-- UMC 側 D1 を参照したセッション/IP チェック
-- OpenAPI (`openapi.yaml`) と Swagger UI (`pages-openapi/index.html`)
-
-## クイックスタート
-
-前提: Node.js 18+, npm, Wrangler 4.x。
-
-```bash
-npm install
-npm run db:local   # ローカル D1 (Miniflare) にスキーマ適用
-npm run dev        # wrangler dev
-```
-
-## エンドポイント概要
-
-| メソッド | パス | 用途 |
+| メソッド | パス | 説明 |
 | --- | --- | --- |
-| GET  | `/health` | ヘルスチェック |
-| POST | `/register/resonite` | Resonite ID を登録 |
-| POST | `/class/create` | クラス定義の作成（スキーマ保存） |
-| GET  | `/users/:userId/class/:className` | クラス定義の取得 |
-| GET  | `/users/:userId/class/:className/items` | アイテム一覧 |
-| POST | `/users/:userId/class/:className/items/create` | アイテム作成 |
-| POST | `/users/:userId/class/:className/items/update` | アイテム更新 |
-| POST | `/users/:userId/class/:className/items/delete` | アイテム削除 |
-| POST | `/users/:userId/class/:className/items/search` | アイテム検索（複数条件 AND） |
-| GET  | `/openapi` `/docs` `/openapi.yaml` | OpenAPI リダイレクト |
+| GET  | `https://cv.umcapp.org/health` | ヘルスチェック |
+| POST | `https://cv.umcapp.org/register/resonite` | Resonite ID を UMC-CV に登録 |
+| POST | `https://cv.umcapp.org/class/create` | クラス定義の作成（スキーマ登録） |
+| GET  | `https://cv.umcapp.org/users/:userId/class/:className` | クラス定義の取得 |
+| GET  | `https://cv.umcapp.org/users/:userId/class/:className/items` | アイテム一覧取得 |
+| POST | `https://cv.umcapp.org/users/:userId/class/:className/items/create` | アイテム作成 |
+| POST | `https://cv.umcapp.org/users/:userId/class/:className/items/update` | アイテム更新 |
+| POST | `https://cv.umcapp.org/users/:userId/class/:className/items/delete` | アイテム削除 |
+| POST | `https://cv.umcapp.org/users/:userId/class/:className/items/search` | アイテム検索（複数条件 AND） |
 
-### リクエスト例
+`userId` は UMC 本体のユーザー ID を指定してください。`can_read = 0` のクラスを読む/書く場合は、UMC 側でログイン中であること（IP 一致）が必須です。
 
-**クラス作成**
+## リクエスト例
+
+### クラス作成
+`POST /class/create`
 ```json
 {
   "userId": 123,
   "className": "Inventory",
   "schema": {
-    "items": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "required": true }, "count": { "type": "number", "required": true } } } }
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "required": true },
+          "count": { "type": "number", "required": true }
+        }
+      }
+    }
   },
   "canRead": 1,
   "canWrite": 0,
@@ -51,7 +44,8 @@ npm run dev        # wrangler dev
 }
 ```
 
-**アイテム作成**
+### アイテム作成
+`POST /users/:userId/class/:className/items/create`
 ```json
 {
   "name": "Apple",
@@ -59,7 +53,8 @@ npm run dev        # wrangler dev
 }
 ```
 
-**検索 + テンプレート整形**
+### 検索 + 任意フォーマットで返す
+`POST /users/:userId/class/:className/items/search`
 ```json
 {
   "conditions": [
@@ -69,29 +64,15 @@ npm run dev        # wrangler dev
 }
 ```
 
-`template` は `{path.to.value}` プレースホルダーを任意に配置できます（英数字/`_`/`.` のみ）。値が無い場合は空文字列を埋めます。`responseShape` も後方互換で利用可能です。
+`template` には `{path.to.value}` プレースホルダーを自由に配置できます（英数字/`_`/`.` のみ）。値が無い場合は空文字列を埋めます。
 
-## 環境変数とバインディング
+### レスポンス整形（簡易オプション）
+- `{"type": "value", "path": "foo.bar"}` → `data.foo.bar` だけを配列で返す
+- `{"type": "keyValue", "keyPath": "id", "valuePath": "name"}` → `[{ "key": <id>, "value": <name> }, ...]` を返す
 
-- D1: `DB` (UMC-CV), `UMC_DB` (UMC 本体)
-- Vars: `OPENAPI_URL`, `OPENAPI_DOCS_URL`, `OPENAPI_YAML_URL`
-- `wrangler.worker.toml` / `wrangler.pages.toml` で設定
+## 認証・前提
+- すべての `/users/:userId/...` 系エンドポイントで UMC 登録ユーザーであることが前提です。
+- UMC 側でログイン（IP 一致）している必要があります。
 
-## ローカル開発 & テスト
-
-- 開発: `npm run dev`
-- テスト: `npm test`
-- OpenAPI を Pages 用に同期: `npm run docs:sync`（`openapi.yaml` を `pages-openapi/openapi.yaml` にコピー）
-
-## デプロイ
-
-- Worker: `wrangler deploy --config wrangler.worker.toml`
-- Pages (Swagger UI): `wrangler pages deploy pages-openapi --project-name <project>`
-
-## ライセンス
-
-TBD（公開リポジトリで適切なライセンスを設定してください）。
-
-## 注意
-
-この README は公開用テンプレートです。秘密情報（鍵・DB ID など）は含めないでください。*** End Patch"**"}​
+## OpenAPI
+- 詳細なパラメータ・スキーマは OpenAPI で確認してください。ブラウザで HTML ドキュメントを開く場合は [`https://cv.umcapp.org/docs`](https://cv.umcapp.org/docs) を参照してください。
